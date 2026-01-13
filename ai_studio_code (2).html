@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Lua Edit</title>
+    
+    <!-- CodeMirror -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/lua/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/edit/closebrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/selection/active-line.min.js"></script>
+
+    <style>
+        * { box-sizing: border-box; }
+        
+        body {
+            margin: 0; padding: 0;
+            background: #fff; color: #333;
+            height: 100vh; width: 100vw;
+            display: flex; flex-direction: column;
+            overflow: hidden;
+            font-family: -apple-system, sans-serif;
+        }
+
+        /* --- Toolbar (บังคับบรรทัดเดียว) --- */
+        #toolbar {
+            height: 50px; /* สูงพอดีนิ้วกด */
+            background: #f9f9f9;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            gap: 8px;
+            
+            /* หัวใจสำคัญ: ห้ามตัดบรรทัด */
+            flex-wrap: nowrap; 
+            white-space: nowrap;
+            overflow-x: auto; /* ถ้าจอเล็กให้เลื่อนแนวนอน */
+            overflow-y: hidden;
+            flex-shrink: 0;
+            
+            /* ซ่อน Scrollbar แต่ยังเลื่อนได้ */
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none; 
+        }
+        #toolbar::-webkit-scrollbar { display: none; }
+
+        .brand {
+            font-weight: 800;
+            font-size: 16px;
+            margin-right: 10px;
+            text-transform: uppercase;
+            flex-shrink: 0; /* ห้ามหด */
+            color: #000;
+        }
+
+        button {
+            background: #fff;
+            border: 1px solid #ccc;
+            color: #333;
+            padding: 6px 12px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 4px;
+            flex-shrink: 0; /* ห้ามหด ห้ามตกบรรทัด */
+        }
+
+        button:active { background: #eee; }
+
+        /* --- Editor --- */
+        #editor-wrapper {
+            flex: 1; 
+            position: relative;
+            overflow: hidden;
+            height: 100%; /* กินพื้นที่ที่เหลือทั้งหมด */
+        }
+
+        .CodeMirror {
+            height: 100% !important;
+            font-family: 'Consolas', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .CodeMirror-gutters { background: #f5f5f5; border-right: 1px solid #eee; }
+        .CodeMirror-selected { background: #e0e0e0 !important; }
+
+        /* Overlays */
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.95);
+            display: none;
+            justify-content: center; align-items: center;
+            z-index: 100;
+            flex-direction: column;
+            border: 3px dashed #ccc;
+        }
+        
+        .modal {
+            background: #fff; border: 1px solid #ccc; padding: 20px;
+            text-align: center; width: 320px; max-width: 90%;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            border-radius: 8px;
+        }
+        .modal p { margin: 0 0 15px 0; font-weight: bold; font-size: 16px; }
+        .link-input { width: 100%; padding: 8px; margin-bottom: 15px; border: 1px solid #ddd; font-family: monospace; }
+
+        /* --- Status Bar --- */
+        #statusbar {
+            height: 30px; 
+            border-top: 1px solid #ddd;
+            display: flex; align-items: center; padding: 0 10px;
+            font-size: 12px; color: #666; justify-content: space-between;
+            flex-shrink: 0;
+            background: #fff;
+        }
+
+        input[type="file"] { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="toolbar">
+        <div class="brand">Lua Edit</div>
+        <!-- ปุ่มเรียงกัน ห้ามตกบรรทัด -->
+        <button onclick="document.getElementById('fileInput').click()">File</button>
+        <button onclick="saveFile()">Save</button>
+        <button onclick="clearCode()">Clear</button>
+        <button onclick="createLink()">Link</button>
+        <button onclick="obfuscateCode()">Obf</button>
+        
+        <input type="file" id="fileInput" accept=".lua,.txt">
+    </div>
+
+    <div id="editor-wrapper">
+        <div id="overlay">
+            <h3 id="overlay-text">Drop File</h3>
+            <div id="link-modal" style="display:none;" class="modal">
+                <p>Get Raw Link</p>
+                <input type="text" class="link-input" id="link-result" readonly>
+                <div style="display:flex; justify-content:center; gap:10px;">
+                    <button onclick="copyLink()">Copy</button>
+                    <button onclick="closeOverlay()">Close</button>
+                </div>
+            </div>
+        </div>
+        <textarea id="code-area">print("Hello Roblox")</textarea>
+    </div>
+
+    <div id="statusbar">
+        <span id="status">Ready</span>
+        <span id="cursor">Ln 1, Col 1</span>
+    </div>
+
+    <script>
+        // Setup Editor
+        var editor = CodeMirror.fromTextArea(document.getElementById("code-area"), {
+            mode: "lua", theme: "default", lineNumbers: true,
+            autoCloseBrackets: true, styleActiveLine: true, indentUnit: 4
+        });
+        editor.setSize("100%", "100%");
+
+        editor.on("cursorActivity", () => {
+            var pos = editor.getCursor();
+            document.getElementById("cursor").innerText = "Ln " + (pos.line + 1) + ", Col " + (pos.ch + 1);
+        });
+
+        // File Open
+        document.getElementById('fileInput').onchange = (e) => {
+            if(e.target.files[0]) readFile(e.target.files[0]);
+            e.target.value = '';
+        };
+
+        // Drag & Drop
+        const overlay = document.getElementById('overlay');
+        const overlayText = document.getElementById('overlay-text');
+        const linkModal = document.getElementById('link-modal');
+
+        window.ondragover = (e) => { e.preventDefault(); overlay.style.display = 'flex'; overlayText.style.display='block'; linkModal.style.display='none'; };
+        window.ondragleave = (e) => { if(e.clientX===0||e.clientY===0) overlay.style.display='none'; };
+        window.ondrop = (e) => {
+            e.preventDefault(); overlay.style.display='none';
+            if(e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
+        };
+
+        function readFile(file) {
+            const r = new FileReader();
+            r.onload = (e) => { editor.setValue(e.target.result); setStatus("Loaded"); };
+            r.readAsText(file);
+        }
+
+        // Save
+        function saveFile() {
+            const blob = new Blob([editor.getValue()], {type: "text/plain"});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = "script.lua";
+            a.click();
+            setStatus("Saved");
+        }
+
+        // Clear
+        function clearCode() {
+            editor.setValue("");
+            setStatus("Cleared");
+        }
+
+        // Obfuscate
+        function obfuscateCode() {
+            const src = editor.getValue();
+            if(!src.trim()) return setStatus("No code");
+            setStatus("Processing...");
+            const k = Math.floor(Math.random()*100)+50;
+            let c = [];
+            for(let i=0; i<src.length; i++) {
+                let e = (src.charCodeAt(i) + k) % 256;
+                let s = e.toString();
+                while(s.length<3) s="0"+s;
+                c.push("\\"+s);
+            }
+            const rV = () => 'v'+Math.random().toString(36).substring(7);
+            const vD=rV(), vF=rV(), vK=rV();
+            const payload = `local ${vK}=${k} local ${vD}="${c.join('')}" local function ${vF}(s) local r="" for i=1,#s do local b=string.byte(s,i,i) r=r..string.char((b-${vK})%256) end return r end loadstring(${vF}(${vD}))()`;
+            editor.setValue(payload);
+            setStatus("Obfuscated");
+        }
+
+        // Link
+        async function createLink() {
+            const code = editor.getValue();
+            if(!code.trim()) return setStatus("Empty");
+
+            overlay.style.display = 'flex';
+            overlayText.style.display = 'none';
+            linkModal.style.display = 'block';
+            
+            const input = document.getElementById('link-result');
+            input.value = "Just a moment..."; 
+
+            try {
+                const req = await fetch("https://pastefy.app/api/v2/paste", {
+                    method: "POST", headers: {"Content-Type":"application/json"},
+                    body: JSON.stringify({title:"Lua Script", content:code})
+                });
+                if(!req.ok) throw new Error();
+                const res = await req.json();
+                input.value = `https://pastefy.app/${res.paste.id}/raw`;
+                input.select();
+            } catch(e) {
+                input.value = "Error";
+            }
+        }
+
+        function copyLink() {
+            document.getElementById('link-result').select();
+            document.execCommand('copy');
+            setStatus("Link Copied");
+        }
+
+        function closeOverlay() {
+            overlay.style.display = 'none';
+        }
+
+        function setStatus(msg) {
+            document.getElementById('status').innerText = msg;
+            setTimeout(() => document.getElementById('status').innerText = "Ready", 2000);
+        }
+    </script>
+</body>
+</html>
